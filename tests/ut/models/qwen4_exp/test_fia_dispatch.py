@@ -141,36 +141,6 @@ def test_fia_descriptor_page_mapping_is_zero_copy(implementation):
     torch.testing.assert_close(key[4], cache[2].flatten(1))
 
 
-def test_paged_fia_uses_row_visibility_and_request_pages(implementation):
-    calls = []
-
-    def fia(**kwargs):
-        calls.append(kwargs)
-        return torch.ones_like(kwargs["query"]), None
-
-    implementation["torch_npu"] = SimpleNamespace(npu_fused_infer_attention_score_v2=fia)
-    query = torch.zeros((3, 4, 8), dtype=torch.bfloat16)
-    cache = torch.zeros((4, 128, 1, 8), dtype=query.dtype)
-    indices = torch.tensor([[32, -1, -1, -1], [0, -1, -1, -1], [-1, -1, -1, -1]])
-    pages = torch.tensor([[0, 1], [3, 2]], dtype=torch.int32)
-    reqs = torch.tensor([1, 0, -1], dtype=torch.int32)
-    positions = torch.tensor([132, 7, -1], dtype=torch.int32)
-    lengths = torch.tensor([5, 256], dtype=torch.int32)
-    result = implementation["qsa_fia_paged_attention"](
-        query, cache, cache, indices, pages, reqs, positions, lengths, torch.empty_like(query)
-    )
-
-    (call,) = calls
-    torch.testing.assert_close(call["block_table"], pages[reqs.long()])
-    assert call["actual_seq_kvlen"] == [256, 256, 256]
-    allowed = ~call["atten_mask"][:, 0, 0]
-    assert allowed[0].nonzero().flatten().tolist() == [128, 129, 130, 131, 132]
-    assert allowed[1].nonzero().flatten().tolist() == [0, 1, 2, 3, 4]
-    assert allowed[2].nonzero().flatten().tolist() == [0]
-    torch.testing.assert_close(result[:2], torch.ones_like(query[:2]))
-    torch.testing.assert_close(result[2], query[2])
-
-
 @pytest.mark.parametrize(
     "query_length,kv_length,prefill",
     [

@@ -17,7 +17,7 @@ import torch
 
 from vllm_ascend.ops.gbsa import generic_block_sparse_attention_metadata
 
-from .gbsa import GBSA_COMPRESS_RATIO, GBSA_PAGE_SIZE, use_qsa_fia_fallback
+from .gbsa import GBSA_COMPRESS_RATIO, GBSA_PAGE_SIZE
 
 
 def _tensor_storage_signature(tensor: torch.Tensor) -> tuple[object, ...]:
@@ -229,7 +229,7 @@ class Qwen4ExpPreparedInputAdapter:
             # Mixed Prefill/Decode dispatch slices GBSA rows dynamically.  Keep
             # its existing per-span fallback; the hot decode-only path has no
             # host request plan and can safely reuse one prepared schedule.
-            if getattr(main, "qsa_request_plan", None) is None and not use_qsa_fia_fallback(raw.seq_lens.device):
+            if getattr(main, "qsa_request_plan", None) is None:
                 self._prepare_gbsa(
                     layer,
                     main,

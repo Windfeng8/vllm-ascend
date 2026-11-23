@@ -48,7 +48,7 @@ from vllm_ascend.ops.triton.qwen4_exp.qsa import (
 from vllm_ascend.utils import vllm_version_is
 
 from .attention_dispatch import build_qsa_request_plan, dispatch_qsa_attention
-from .gbsa import GBSA_PAGE_SIZE, qsa_gbsa_attention, use_qsa_fia_fallback
+from .gbsa import GBSA_PAGE_SIZE, qsa_gbsa_attention
 from .lightning_indexer import QSAIndexerMetadataProtocol, qsa_select_paged_tokens_lightning_v2
 
 if vllm_version_is("0.33.0"):
@@ -582,8 +582,7 @@ class AscendQSAImpl:
         compact_indices = selected_indices[:, :packed_width]
         request_plan = getattr(attn_metadata, "qsa_request_plan", None)
         if request_plan is None:
-            backend = "FIA" if use_qsa_fia_fallback(query.device) else "GBSA"
-            logger.info_once("QSA attention is using the CANN %s backend.", backend)
+            logger.info_once("QSA attention is using the CANN GBSA backend.")
             return qsa_gbsa_attention(
                 query[:num_tokens],
                 key_cache,

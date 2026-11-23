@@ -28,10 +28,7 @@ related operation is unsupported on the device.
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum, auto
-from functools import cache
 from types import MappingProxyType
-
-from packaging.version import InvalidVersion, Version
 
 from vllm_ascend.device.device_config import get_device_config
 from vllm_ascend.device.hardware import AscendDeviceType
@@ -332,8 +329,6 @@ class HardwareProfile:
     # A5 uses mixed softmax for compatibility with CANN GBSA packages that
     # reject BF16 precision 0. A3 retains FP32 online softmax.
     minimax_m3_gbsa_bf16_softmax_precision: int = 0
-    # Minimum CANN release with the four-token QSA GBSA ABI on this SoC.
-    qsa_gbsa_block4_min_cann_version: str | None = None
     # Fixed GDN verification uses the strided recurrent kernel at/above this
     # query length to work around native operator numerical failures. None
     # retains native dispatch; this is a stack workaround, not a silicon limit.
@@ -445,7 +440,6 @@ _HARDWARE_PROFILES: Mapping[AscendDeviceType, HardwareProfile] = MappingProxyTyp
         ),
         AscendDeviceType.A3: HardwareProfile(
             _device_type=AscendDeviceType.A3,
-            qsa_gbsa_block4_min_cann_version="9.3.0",
             flash_attn_npu_3_models=frozenset({FlashAttentionNpu3Model.MINIMAX}),
             attention_backend_family=AttentionBackendFamily.STANDARD,
             cpu_binding_mode=CPUBindingMode.GLOBAL_SLICE,
@@ -577,18 +571,3 @@ def get_current_hardware_profile() -> HardwareProfile:
     """Return the profile selected by the current device configuration."""
 
     return _CURRENT_HARDWARE_PROFILE
-
-
-@cache
-def supports_qsa_gbsa_block4() -> bool:
-    """Check the installed CANN stack once before using four-token blocks."""
-    minimum = get_current_hardware_profile().qsa_gbsa_block4_min_cann_version
-    if minimum is None:
-        return True
-
-    from torch_npu.npu.utils import get_cann_version
-
-    try:
-        return Version(get_cann_version()) >= Version(minimum)
-    except InvalidVersion:
-        return False

@@ -93,42 +93,6 @@ def prepare_qsa_fia_paged_kv(
     return keys, values, table.contiguous(), page_count * GBSA_PAGE_SIZE
 
 
-def qsa_fia_paged_attention(
-    query: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    compact_indices: torch.Tensor,
-    block_table: torch.Tensor,
-    token_to_req: torch.Tensor,
-    logical_positions: torch.Tensor,
-    seq_lens: torch.Tensor,
-    output: torch.Tensor,
-) -> torch.Tensor:
-    """Use the same selected-token mask with one paged FIA query per row."""
-    kv_length = block_table.shape[1] * GBSA_PAGE_SIZE
-    requests = token_to_req.to(torch.int64)
-    # The page capacity is static across graph replays. Keep logical
-    # visibility on the device and apply it through the selected-token mask.
-    visible_lens = torch.minimum(logical_positions.add(1).clamp_min(0), seq_lens[requests])
-    key, value, table, _ = prepare_qsa_fia_paged_kv(key_cache, value_cache, block_table, kv_length)
-    query_tile = min(QSA_FIA_QUERY_TILE, max(1, QSA_FIA_MASK_BUDGET_BYTES // kv_length))
-    for start in range(0, query.shape[0], query_tile):
-        end = min(start + query_tile, query.shape[0])
-        rows = slice(start, end)
-        qsa_fia_attention(
-            query[rows],
-            key,
-            value,
-            compact_indices[rows],
-            visible_lens[rows],
-            kv_length,
-            output[rows],
-            block_table=table[requests[rows]].contiguous(),
-            kv_lengths=[kv_length] * (end - start),
-        )
-    return output
-
-
 def qsa_fia_attention(
     query: torch.Tensor,
     key: torch.Tensor,

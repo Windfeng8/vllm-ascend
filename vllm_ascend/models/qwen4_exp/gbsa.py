@@ -3,6 +3,7 @@
 
 import torch
 
+from vllm_ascend.device.hardware_profile import supports_qsa_gbsa_block4
 from vllm_ascend.ops.gbsa import (
     generic_block_sparse_attention,
     generic_block_sparse_attention_metadata,
@@ -12,6 +13,10 @@ from vllm_ascend.ops.triton.qwen4_exp.gbsa import prepare_qsa_gbsa_inputs
 GBSA_COMPRESS_RATIO = 4
 GBSA_RESIDUAL_TOKENS = GBSA_COMPRESS_RATIO - 1
 GBSA_PAGE_SIZE = 128
+
+
+def use_qsa_fia_fallback(device: torch.device) -> bool:
+    return device.type == "npu" and not supports_qsa_gbsa_block4()
 
 
 def qsa_gbsa_attention(
@@ -54,6 +59,21 @@ def qsa_gbsa_attention(
         raise ValueError("QSA GBSA request mapping must match query rows")
     if logical_positions.shape != (query.shape[0],):
         raise ValueError("QSA GBSA logical positions must match query rows")
+
+    if use_qsa_fia_fallback(query.device):
+        from .fia import qsa_fia_paged_attention
+
+        return qsa_fia_paged_attention(
+            query,
+            key_cache,
+            value_cache,
+            compact_indices,
+            block_table,
+            token_to_req,
+            logical_positions,
+            seq_lens,
+            output,
+        )
 
     sparse_idx, sparse_count, row_visible_lens, cu_q, row_block_table = prepare_qsa_gbsa_inputs(
         compact_indices, logical_positions, seq_lens, token_to_req, block_table, num_kv_heads

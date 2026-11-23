@@ -12,7 +12,7 @@ import pytest
 import torch
 
 
-def _load_adapter(monkeypatch, *, load_wrapper: bool = False):
+def _load_adapter(monkeypatch, *, load_wrapper: bool = False, use_fia: bool = False):
     source = Path(__file__).resolve().parents[4] / "vllm_ascend/models/qwen4_exp/input_adapter.py"
     module = ast.parse(source.read_text())
     module.body = [node for node in module.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
@@ -42,6 +42,7 @@ def _load_adapter(monkeypatch, *, load_wrapper: bool = False):
         "GBSA_COMPRESS_RATIO": 4,
         "GBSA_PAGE_SIZE": 128,
         "generic_block_sparse_attention_metadata": gbsa_metadata,
+        "use_qsa_fia_fallback": lambda device: use_fia,
     }
     exec(compile(module, str(source), "exec"), namespace)
     if load_wrapper:
@@ -165,8 +166,9 @@ def test_one_dimensional_positions_keep_fixed_address(monkeypatch):
     assert layer._qsa_prepared_cos_sin.data_ptr() == pointer
 
 
-def test_full_graph_metadata_uses_padded_geometry_and_fixed_address(monkeypatch):
-    adapter_cls, calls = _load_adapter(monkeypatch)
+@pytest.mark.parametrize("use_fia", [False, True])
+def test_full_graph_metadata_uses_padded_geometry_and_fixed_address(monkeypatch, use_fia):
+    adapter_cls, calls = _load_adapter(monkeypatch, use_fia=use_fia)
     layer = AscendQwen4ExpQSAAttention()
     adapter = adapter_cls(_Model(layer))
 
@@ -192,6 +194,11 @@ def test_full_graph_metadata_uses_padded_geometry_and_fixed_address(monkeypatch)
 
     metadata, main, compressed = make_metadata([4, 8])
     adapter.prepare_attention_metadata(metadata, full_graph=True)
+    if use_fia:
+        assert not hasattr(main, "qsa_gbsa_metadata")
+        assert compressed.qsa_lightning_v2_metadata.tolist() == [2, 3, 2]
+        assert calls == {"li": 1, "gbsa": 0}
+        return
     li_ptr = compressed.qsa_lightning_v2_metadata.data_ptr()
     gbsa_ptr = main.qsa_gbsa_metadata.data_ptr()
     first_li = compressed.qsa_lightning_v2_metadata.clone()
